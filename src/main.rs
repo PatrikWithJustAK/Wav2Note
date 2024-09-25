@@ -1,16 +1,44 @@
 use hound;
 use rustfft::FftPlanner;
 use rustfft::num_complex::Complex;
-use std::f32::consts::PI;
 
 fn main() {
     // Open the WAV file
-    let mut reader = hound::WavReader::open("src/cmajor.wav").expect("Failed to open file");
+    let mut reader = hound::WavReader::open("snare.wav").expect("Failed to open file");
 
-    // Collect samples from the WAV file
-    let samples: Vec<f32> = reader.samples::<i16>() // Assuming 16-bit audio samples
-        .map(|s| s.unwrap() as f32) // Convert i16 to f32 for FFT processing
-        .collect();
+    // Get the WAV file specifications
+    let spec = reader.spec();
+
+    // Collect samples based on the bit depth or format
+    let samples: Vec<f32> = match spec.sample_format {
+        hound::SampleFormat::Int => {
+            match spec.bits_per_sample {
+                16 => reader.samples::<i16>()
+                    .map(|s| s.unwrap() as f32)
+                    .collect(),
+                    //24 bit depth is common for "high res audio", need to normalize 24bit to 32bit to catch this
+                24 => reader.samples::<i32>() 
+                    .map(|s| {
+                        let sample = s.unwrap(); //take the sample as 32bit int
+                        let adjusted_sample = sample >> 8; // Shift by 8 bits to get the 24-bit value
+                        (adjusted_sample as f32) / (std::i32::MAX as f32) // Normalize the sample
+                    })
+                    .collect(), //hope and pray this works
+                32 => reader.samples::<i32>()
+                    .map(|s| (s.unwrap() as f32) / (std::i32::MAX as f32))  // Normalize 32-bit int samples
+                    .collect(),
+                _ => panic!("Unsupported bit depth for integer samples!"),
+            }
+        },
+        hound::SampleFormat::Float => {
+            match spec.bits_per_sample {
+                32 => reader.samples::<f32>()
+                    .map(|s| s.unwrap())
+                    .collect(),
+                _ => panic!("Unsupported bit depth for floating-point samples!"),
+            }
+        },
+    };
 
     // Perform FFT
     let fft_size = samples.len().next_power_of_two(); // Get the next power of 2 for FFT
